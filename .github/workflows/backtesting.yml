@@ -1,0 +1,25 @@
+name: Quant Cloud Execution Engine
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 14 * * 1-5' # Automatically executes every weekday at 2:00 PM UTC (Before US Market Open)
+
+jobs:
+  execute_backtest:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Clone Code Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Run Algorithm Container
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: |
+        docker build -t algo-engine .
+        docker run --env SUPABASE_URL=$SUPABASE_URL --env SUPABASE_KEY=$SUPABASE_KEY algo-engine
