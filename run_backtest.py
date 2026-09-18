@@ -4,10 +4,16 @@ import pandas as pd
 import numpy as np
 import talib
 import config
+
+from dotenv import load_file, load_dotenv
+load_dotenv() #This scsns your project root for .env and loads the variables
 from database import DatabaseManager
 import strategies
+from data_provider import RobustDataProvider  # New multi-source data integration
 
+# Initialize managers and robust multi-source data provider
 db = DatabaseManager()
+provider = RobustDataProvider()
 
 def is_duplicate_signal(ticker, timeframe, current_direction):
     """
@@ -55,10 +61,14 @@ def scan_portfolio():
         
         for asset in assets:
             try:
-                lookback = "1y" if timeframe == "1d" else "60d"
+                # Dynamically set lookback context constraints
+                lookback_days = 365 if timeframe == "1d" else 60
                 
-                df = yf.download(asset, period=lookback, interval=timeframe)
+                # Fetching via robust fallback array (Alpaca -> IBKR -> yfinance)
+                df = provider.fetch_data(asset, timeframe, lookback_days)
+                
                 if df.empty or len(df) < 50: 
+                    print(f"⏭️ Skipping {asset} ({timeframe.upper()}): Insufficient data or empty frame.")
                     continue
                 
                 if isinstance(df.columns, pd.MultiIndex): 

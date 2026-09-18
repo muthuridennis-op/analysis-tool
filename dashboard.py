@@ -3,7 +3,12 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
+import os
 from supabase import create_client
+from dotenv import load_dotenv
+
+# --- INITIALIZE ENVIRONMENT VARIABLES ---
+load_dotenv()  # Safely injects parameters from your local .env file
 
 # Page Config
 st.set_page_config(
@@ -15,7 +20,15 @@ st.set_page_config(
 
 @st.cache_resource
 def init_supabase():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    # Prioritizes cloud secrets; drops back to local .env configuration automatically
+    url = st.secrets.get("SUPABASE_URL") or os.environ.get("SUPABASE_URL")
+    key = st.secrets.get("SUPABASE_KEY") or os.environ.get("SUPABASE_KEY")
+    
+    if not url or not key:
+        st.error("🚨 CRITICAL ERROR: Supabase connection credentials missing from environment.")
+        st.stop()
+        
+    return create_client(url, key)
 
 supabase = init_supabase()
 
