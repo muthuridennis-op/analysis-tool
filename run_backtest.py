@@ -5,7 +5,7 @@ import numpy as np
 import talib
 import config
 
-from dotenv import load_file, load_dotenv
+from dotenv import  load_dotenv
 load_dotenv() #This scsns your project root for .env and loads the variables
 from database import DatabaseManager
 import strategies

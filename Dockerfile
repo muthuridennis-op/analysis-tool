@@ -19,7 +19,7 @@ RUN micromamba install -y -n base -c conda-forge \
     && micromamba clean --all --yes
 
 # Set up the environmental path so the system locates python instantly
-ENV PATH /opt/conda/bin:$PATH
+ENV PATH= "/opt/conda/bin:$PATH"
 
 COPY . .
 
