@@ -22,8 +22,12 @@ tab_signals, tab_analytics = st.tabs(["📥 Active Signals", "📊 Historical Jo
 # TAB 1: ACTIVE SIGNALS INTERFACE
 # ==========================================
 with tab_signals:
-    response = supabase.table("signals").select("*").eq("status", "PENDING").execute()
-    signals = response.data
+    try:
+        response = supabase.table("signals").select("*").eq("status", "PENDING").execute()
+        signals = response.data
+    except Exception as e:
+        st.error(f"Database Query Error: {e}")
+        signals = []
     
     if not signals:
         st.success("🟢 All systems nominal. No pending signals detected.")
@@ -33,16 +37,22 @@ with tab_signals:
         for sig in signals:
             ticker = sig['ticker']
             direction = sig['direction']
-            alert_price = sig['execution_price']
+            alert_price = float(sig['execution_price'])
+            stop_loss = float(sig.get('stop_loss', 0.0))
+            take_profit = float(sig.get('take_profit', 0.0))
             
             with st.container(border=True):
-                col_title, col_metric = st.columns()
+                col_title, col_m1, col_m2, col_m3 = st.columns(4)
                 with col_title:
-                    st.markdown(f"### 💱 Asset: `{ticker}`")
+                    st.markdown(f"### 💱 `{ticker}`")
                     color = "green" if direction == "BUY" else "red"
-                    st.markdown(f"Action Request: :{color}[**{direction}**]")
-                with col_metric:
-                    st.metric(label="Cloud Trigger", value=f"\${alert_price:.2f}")
+                    st.markdown(f"Action: :{color}[**{direction}**]")
+                with col_m1:
+                    st.metric(label="Entry", value=f"\${alert_price:.4f}")
+                with col_m2:
+                    st.metric(label="🛡️ Stop Loss", value=f"\${stop_loss:.4f}" if stop_loss else "N/A")
+                with col_m3:
+                    st.metric(label="🎯 Take Profit", value=f"\${take_profit:.4f}" if take_profit else "N/A")
                 
                 # --- INTERACTIVE CANDLESTICK CHART EXPANDER ---
                 with st.expander("🔍 View Live Technical Analysis Chart", expanded=False):
@@ -95,9 +105,13 @@ with tab_signals:
 with tab_analytics:
     st.subheader("📁 Strategy Historical Log")
     
-    history_res = supabase.table("signals").select("*").neq("status", "PENDING").order("created_at", desc=True).execute()
-    history_data = history_res.data
-    
+    try:
+        history_res = supabase.table("signals").select("*").neq("status", "PENDING").order("created_at", desc=True).execute()
+        history_data = history_res.data
+    except Exception as e:
+        st.error(f"Error fetching logs: {e}")
+        history_data = []
+        
     if not history_data:
         st.info("No recorded historical data available.")
     else:
