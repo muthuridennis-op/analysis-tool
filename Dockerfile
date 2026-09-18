@@ -6,7 +6,7 @@ RUN apk add --no-cache bash
 
 WORKDIR /app
 
-# Install TA-Lib pre-compiled binaries along with Python dependencies directly from Conda Forge
+# Install TA-Lib pre-compiled binaries along with base dependencies from Conda Forge
 RUN micromamba install -y -n base -c conda-forge \
     python=3.10 \
     ta-lib \
@@ -18,10 +18,13 @@ RUN micromamba install -y -n base -c conda-forge \
     requests \
     && micromamba clean --all --yes
 
-# Set up the environmental path so the system locates python instantly
+# Set up the environmental path cleanly using standard modern unquoted syntax
 ENV PATH=/opt/conda/bin:$PATH
 
 COPY . .
+
+# --- FIXED STEP: Force Python to install the remaining requirements including python-dotenv ---
+RUN micromamba run -n base pip install --no-cache-dir -r requirements.txt
 
 # Run the app using micromamba's environmental shell execution layer
 CMD ["micromamba", "run", "-n", "base", "python", "run_backtest.py"]
