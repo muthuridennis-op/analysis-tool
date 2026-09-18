@@ -3,21 +3,52 @@ import pandas as pd
 import numpy as np
 import talib
 import os
+import requests
 from supabase import create_client
+
+def push_telegram_alert(message):
+    """Fires an instant direct notification to your Telegram application"""
+    token = os.environ.get("TELEGRAM_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if token and chat_id:
+        url = f"https://telegram.org{token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        try:
+            requests.post(url, json=payload, timeout=10)
+            print("✉️ Telegram notification broadcast completed successfully.")
+        except Exception as e:
+            print(f"⚠️ Telegram failure: {e}")
+
+def push_discord_alert(message):
+    """Fires a stylized rich text webhook embed directly to your Discord channel"""
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if webhook_url:
+        payload = {
+            "username": "Algo Signal Engine",
+            "content": f"🚨 **NEW TRADING SIGNAL IDENTIFIED** 🚨\n{message}"
+        }
+        try:
+            requests.post(webhook_url, json=payload, timeout=10)
+            print("✉️ Discord channel webhook broadcast completed successfully.")
+        except Exception as e:
+            print(f"⚠️ Discord failure: {e}")
 
 def run_pipeline():
     print("📥 Fetching real-time market data in the cloud...")
-    # Download historical data dynamically into cloud environment memory
-    df = yf.download("AAPL", period="1y", interval="1d")
+    # Change "AAPL" to a Forex pair like "EURUSD=X" if you are trading currencies on FXPesa!
+    ticker = "EURUSD=X" 
+    df = yf.download(ticker, period="1y", interval="1d")
     
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df.columns = df.columns.str.lower()
     df = df.loc[~df.index.duplicated(keep="first")].sort_index().ffill().bfill()
     
-    print("📊 Calculating indicators (SMA 50 and SMA 200)...")
-    # Extract technical parameters matching your notebook algorithm logic
+    # --- INDICATOR CALCULATIONS ---
     close_prices = df["close"].to_numpy().astype(float)
+    volume_data = df["volume"].to_numpy().astype(float)
+    
+    # 1. Trend Indicators (Moving Averages)
     df["sma_50"] = talib.SMA(close_prices, timeperiod=50)
     df["sma_200"] = talib.SMA(close_prices, timeperiod=200)
     
@@ -27,32 +58,55 @@ def run_pipeline():
     golden_cross = (df["sma_50"] > df["sma_200"]) & (df["prev_sma_50"] <= df["prev_sma_200"])
     death_cross = (df["sma_50"] < df["sma_200"]) & (df["prev_sma_50"] >= df["prev_sma_200"])
     
-    # Check the immediate final row representing today's active status
-    if golden_cross.iloc[-1] or death_cross.iloc[-1]:
-        signal_type = "BUY" if golden_cross.iloc[-1] else "SELL"
-        current_price = float(df["close"].iloc[-1])
-        
-        print(f"🚨 ALERT: {signal_type} crossover detected! Pushing to database...")
-        
-        # Connect to Supabase to update your phone dashboard
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_KEY")
-        
-        if not url or not key:
-            print("⚠️ Error: Supabase credentials are missing from environment variables.")
-            return
+    # 2. Advanced Volume Filter (Calculates 20-day Average Volume)
+    df["volume_ma"] = talib.SMA(volume_data, timeperiod=20)
+    
+    # Condition: Current volume must be higher than the 20-day average volume
+    high_volume = df["volume"] > df["volume_ma"]
+    
+    # --- SIGNAL VERIFICATION ENGINE ---
+    # Check the immediate final row representing today's active bar status
+    is_crossover = golden_cross.iloc[-1] or death_cross.iloc[-1]
+    is_volume_valid = high_volume.iloc[-1]
+    
+    if is_crossover:
+        if is_volume_valid:
+            signal_type = "BUY" if golden_cross.iloc[-1] else "SELL"
+            current_price = float(df["close"].iloc[-1])
+            current_vol = float(df["volume"].iloc[-1])
+            avg_vol = float(df["volume_ma"].iloc[-1])
             
-        supabase = create_client(url, key)
-        
-        supabase.table("signals").insert({
-            "ticker": "AAPL",
-            "direction": signal_type,
-            "execution_price": current_price,
-            "status": "PENDING"
-        }).execute()
-        print(f"🚀 Signal {signal_type} pushed successfully to database layer.")
+            print(f"🚨 VALID SIGNAL: {signal_type} crossover supported by strong volume.")
+            
+            # Connect to Supabase Cloud Database Layer
+            url = os.environ.get("SUPABASE_URL")
+            key = os.environ.get("SUPABASE_KEY")
+            supabase = create_client(url, key)
+            
+            supabase.table("signals").insert({
+                "ticker": ticker,
+                "direction": signal_type,
+                "execution_price": current_price,
+                "status": "PENDING"
+            }).execute()
+            
+            # --- NOTIFICATION FRAMEWORK ---
+            dashboard_url = "https://streamlit.app" # Replace with your real Streamlit App URL
+            
+            alert_msg = (
+                f"📈 *Asset:* {ticker}\n"
+                f"⚡ *Direction:* {signal_type}\n"
+                f"💵 *Trigger Price:* ${current_price:.4f}\n"
+                f"📊 *Volume Profile:* Strong (Current: {current_vol:,.0f} > 20MA: {avg_vol:,.0f})\n\n"
+                f"👉 Open dashboard to log trade: {dashboard_url}"
+            )
+            
+            push_telegram_alert(alert_msg)
+            push_discord_alert(alert_msg)
+        else:
+            print("🔍 Crossover spotted, but REJECTED due to low institutional volume (Sideways Market).")
     else:
-        print("🔍 Scanning Complete: No crossover patterns registered on the current bar.")
+        print("🔍 Scanning Complete: No structural technical patterns registered on this bar.")
 
 if __name__ == "__main__":
     run_pipeline()
