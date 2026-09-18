@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 14 * * 1-5' # Automatically executes every weekday at 2:00 PM UTC (Before US Market Open)
+    - cron: '15 20 * * 1-5' # Automatically executes every weekday at 20:15 PM UTC (After US Market close)
 
 jobs:
   execute_backtest:
