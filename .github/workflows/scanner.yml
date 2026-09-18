@@ -1,0 +1,22 @@
+name: Run Trading Scanner Matrix
+
+on:
+  schedule:
+    # Runs every 4 hours from Monday through Friday
+    - cron: '0 */4 * * 1-5'
+  workflow_dispatch: # Allows manual trigger within GitHub UI
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Build and Run Engine Container
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          docker build -t algo-scanner .
+          docker run --env SUPABASE_URL=$SUPABASE_URL --env SUPABASE_KEY=$SUPABASE_KEY algo-scanner

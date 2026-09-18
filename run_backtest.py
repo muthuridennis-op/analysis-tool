@@ -9,6 +9,32 @@ import strategies
 
 db = DatabaseManager()
 
+def is_duplicate_signal(ticker, timeframe, current_direction):
+    """
+    Queries Supabase for the most recent entry matching the asset and timeframe.
+    Returns True if the latest signal shares the same direction, preventing spams.
+    """
+    try:
+        # Fetch only the single most recent record for this asset + timeframe configuration
+        response = db.client.table("signals") \
+            .select("direction, status") \
+            .eq("ticker", ticker) \
+            .eq("timeframe", timeframe.upper()) \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+            
+        if response.data:
+            latest_record = response.data[0]
+            # Match condition: If the trend direction is identical, flag it as a duplicate
+            if latest_record["direction"] == current_direction:
+                return True
+    except Exception as e:
+        # Fallback safety: If database lookup fails, log error and allow execution
+        print(f"⚠️ Warning during duplicate safety lookup: {e}")
+        
+    return False
+
 def get_risk_bounds(ticker, signal, price, atr):
     if pd.isna(atr) or atr <= 0: 
         atr = price * 0.015
@@ -24,13 +50,11 @@ def get_risk_bounds(ticker, signal, price, atr):
 def scan_portfolio():
     print("🏁 Starting Multi-Timeframe Cloud Scanner Engine...")
     
-    # Outer Loop: Scans keys inside WATCH_LIST ("1d", "4h")
     for timeframe, assets in config.WATCH_LIST.items():
         print(f"\n⏳ Processing Timeframe Horizon: {timeframe.upper()} ({len(assets)} assets)")
         
         for asset in assets:
             try:
-                # Dynamic lookback window mapping: 1 year for daily, 60 days for 4-hour
                 lookback = "1y" if timeframe == "1d" else "60d"
                 
                 df = yf.download(asset, period=lookback, interval=timeframe)
@@ -51,7 +75,7 @@ def scan_portfolio():
                 vol_ma = talib.SMA(vol, timeperiod=20)
                 
                 signal = None
-                # --- STRATEGY ROUTER MATRIX ---
+                
                 if asset in ["EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDJPY=X", "USDCAD=X"]:
                     signal = strategies.evaluate_forex(cl)
                 elif asset == "^GSPC":
@@ -65,12 +89,28 @@ def scan_portfolio():
                     signal = strategies.evaluate_oil(macd, sig, vol, vol_ma)
                     
                 if signal:
+                    # DEDUPLICATION CONSTRAINT STEP: 
+                    # If this asset printed the exact same signal during the last loop, skip it.
+                    if is_duplicate_signal(asset, timeframe, signal):
+                        print(f"⏭️  Skipping {asset} ({timeframe.upper()}): Consecutive duplicate '{signal}' alert detected.")
+                        continue
+                        
                     cur_price = float(cl[-1])
                     sl, tp = get_risk_bounds(asset, signal, cur_price, atr)
                     
-                    # Formats title string layout dynamically (e.g. "EURUSD=X (4H)")
-                    labeled_ticker = f"{asset} ({timeframe.upper()})"
-                    db.insert_signal(labeled_ticker, signal, cur_price, sl, tp)
+                    payload = {
+                        "ticker": asset,
+                        "direction": signal,
+                        "execution_price": cur_price,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "status": "PENDING",
+                        "timeframe": timeframe.upper()
+                    }
+                    
+                    # Commit distinct unique row data to Supabase Database table
+                    db.client.table("signals").insert(payload).execute()
+                    print(f"🚀 Signal uploaded successfully for {asset} ({timeframe.upper()}).")
                     
             except Exception as e:
                 print(f"❌ Error scanning {asset} on {timeframe.upper()}: {e}")

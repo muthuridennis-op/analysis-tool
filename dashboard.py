@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -16,7 +17,6 @@ supabase = init_supabase()
 st.title("📱 Quantitative Trading Terminal")
 
 # --- GLOBAL SEARCH LOOKUP ENGINE COMPONENT ---
-# Maps cryptic ticker strings to simple human-readable names for your mobile interface
 friendly_names = {
     "All Assets": "All Assets",
     "EURUSD=X": "EURUSD (Euro)",
@@ -45,7 +45,7 @@ tab_signals, tab_analytics = st.tabs(["📥 Active Signals", "📊 Historical Jo
 with tab_signals:
     try:
         query = supabase.table("signals").select("*").eq("status", "PENDING")
-        # Apply strict query filtration if a single symbol focus is picked
+        # BUG FIX: Pure query execution filter now pairs perfectly with raw string keys
         if search_selection != "All Assets":
             query = query.eq("ticker", search_selection)
             
@@ -63,6 +63,8 @@ with tab_signals:
         for sig in signals:
             ticker = sig['ticker']
             direction = sig['direction']
+            # Safely fetch the new timeframe column data with a fallback default
+            tf_label = sig.get('timeframe', '1D') 
             alert_price = float(sig['execution_price'])
             stop_loss = float(sig.get('stop_loss', 0.0))
             take_profit = float(sig.get('take_profit', 0.0))
@@ -70,7 +72,8 @@ with tab_signals:
             with st.container(border=True):
                 col_title, col_m1, col_m2, col_m3 = st.columns(4)
                 with col_title:
-                    st.markdown(f"### 💱 `{ticker}`")
+                    # Visual Anchor Update: Clearly labels asset and timeframe context
+                    st.markdown(f"### 💱 `{ticker}` \n**[{tf_label}]**")
                     color = "green" if direction == "BUY" else "red"
                     st.markdown(f"Action: :{color}[**{direction}**]")
                 with col_m1:
@@ -83,7 +86,12 @@ with tab_signals:
                 # --- INTERACTIVE CANDLESTICK CHART EXPANDER ---
                 with st.expander("🔍 View Live Technical Analysis Chart", expanded=False):
                     st.write("Loading technical chart grid...")
-                    raw_df = yf.download(ticker, period="6mo", interval="1d")
+                    
+                    # Maps chart view window intervals dynamically matching signal timeframe
+                    yf_interval = "1d" if tf_label.lower() == "1d" else "4h"
+                    yf_period = "6mo" if yf_interval == "1d" else "60d"
+                    
+                    raw_df = yf.download(ticker, period=yf_period, interval=yf_interval)
                     if not raw_df.empty:
                         if isinstance(raw_df.columns, pd.MultiIndex):
                             raw_df.columns = raw_df.columns.get_level_values(0)
@@ -145,7 +153,10 @@ with tab_analytics:
     else:
         hist_df = pd.DataFrame(history_data)
         
-        # Summary Analytics Layout Cards
+        # Ensure timeframe key string values exist uniformly across hist_df columns
+        if 'timeframe' not in hist_df.columns:
+            hist_df['timeframe'] = '1D'
+        
         total_signals = len(hist_df)
         traded_count = len(hist_df[hist_df['status'] == 'MANUALLY_TRADED'])
         acceptance_rate = (traded_count / total_signals * 100) if total_signals > 0 else 0
@@ -155,7 +166,6 @@ with tab_analytics:
         col_m2.metric("Executed", traded_count)
         col_m3.metric("Action Rate", f"{acceptance_rate:.1f}%")
         
-        # Distribution Pie Chart
         st.markdown("### 📊 Filtered Activity Breakdown")
         status_counts = hist_df['status'].value_counts()
         fig_pie = go.Figure(data=[go.Pie(
@@ -167,9 +177,9 @@ with tab_analytics:
         fig_pie.update_layout(height=250, margin=dict(l=10, r=10, t=20, b=10))
         st.plotly_chart(fig_pie, use_container_width=True)
         
-        # Complete Historical Data Table
+        # Complete Historical Data Table Layout (augmented to cleanly track processing windows)
         st.markdown("### 📝 Full Audit History Ledger")
         st.dataframe(
-            hist_df[['ticker', 'direction', 'execution_price', 'status']], 
+            hist_df[['ticker', 'timeframe', 'direction', 'execution_price', 'status']], 
             use_container_width=True
         )
