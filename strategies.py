@@ -1,13 +1,18 @@
 # strategies.py
 import talib
+import numpy as np
+
+def pd_shift(numpy_array):
+    """Helper macro to safely shift numeric values by 1 candle back"""
+    return np.roll(numpy_array, 1)
 
 def evaluate_forex(close_prices):
     ema_20 = talib.EMA(close_prices, timeperiod=20)
-    df_ema_50 = talib.EMA(close_prices, timeperiod=50)
+    ema_50 = talib.EMA(close_prices, timeperiod=50)
     rsi = talib.RSI(close_prices, timeperiod=14)
     
-    cross_up = (ema_20 > df_ema_50) & (pd_shift(ema_20) <= pd_shift(df_ema_50))
-    cross_down = (ema_20 < df_ema_50) & (pd_shift(ema_20) >= pd_shift(df_ema_50))
+    cross_up = (ema_20 > ema_50) & (pd_shift(ema_20) <= pd_shift(ema_50))
+    cross_down = (ema_20 < ema_50) & (pd_shift(ema_20) >= pd_shift(ema_50))
     
     if cross_up[-1] and (50 < rsi[-1] < 65): return "BUY"
     if cross_down[-1] and (35 < rsi[-1] < 50): return "SELL"
@@ -36,8 +41,3 @@ def evaluate_oil(macd, signal, volume, volume_ma):
     if macd_up[-1] and vol_ok[-1]: return "BUY"
     if macd_dn[-1] and vol_ok[-1]: return "SELL"
     return None
-
-def pd_shift(numpy_array):
-    """Helper macro to mimic pandas shifting performance values safely"""
-    import numpy as np
-    return np.roll(numpy_array, 1)
