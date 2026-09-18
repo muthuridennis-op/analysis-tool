@@ -95,7 +95,7 @@ with tab_signals:
 with tab_analytics:
     st.subheader("📁 Strategy Historical Log")
     
-    history_res = supabase.table("signals").select("*").neq("status", "PENDING").order("created_at", descending=True).execute()
+    history_res = supabase.table("signals").select("*").neq("status", "PENDING").order("created_at", desc=True).execute()
     history_data = history_res.data
     
     if not history_data:
