@@ -1,43 +1,133 @@
 import streamlit as st
-import os
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objects as go
 from supabase import create_client
 
-st.set_page_config(page_title="System Diagnostics", layout="centered")
-st.title("⚙️ Database Connection Diagnostics")
+# Page Configuration optimized for clean touch grids on mobile screens
+st.set_page_config(page_title="Algo Dashboard", page_icon="📈", layout="centered")
 
-# 1. Test Secret Variables extraction
-try:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    st.success("✅ Streamlit successfully extracted keys from the Secrets panel!")
-    # Show the first few characters to verify it's the service_role, not the anon key
-    st.info(f"Key starts with: `{key[:15]}...` (Verify this matches your service_role string)")
-except Exception as e:
-    st.error(f"❌ Failed to extract secrets: {e}")
-    st.stop()
+@st.cache_resource
+def init_supabase():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-# 2. Test Connection Initialization
-try:
-    supabase = create_client(url, key)
-    st.success("✅ Supabase client initialized in Python memory successfully.")
-except Exception as e:
-    st.error(f"❌ Failed to initialize Supabase client: {e}")
-    st.stop()
+supabase = init_supabase()
 
-# 3. Test Raw API Request with a Try/Catch Block to capture the hidden error
-st.markdown("### 🔍 Initiating Direct Connection Test...")
-try:
-    # Run a simple query to fetch anything from the table
-    response = supabase.table("signals").select("id").limit(1).execute()
-    st.success("🎉 CONGRATULATIONS! Connection verified. The table is accessible!")
-    st.write("Database Response Data:", response.data)
-except Exception as e:
-    st.error("❌ The Database rejected the request.")
-    st.markdown("#### Here is the real unredacted error message from Supabase:")
-    st.code(str(e))
+st.title("📱 Quantitative Trading Terminal")
+
+# Interactive Multi-Tab Mobile Framework
+tab_signals, tab_analytics = st.tabs(["📥 Active Signals", "📊 Historical Journal"])
+
+# ==========================================
+# TAB 1: ACTIVE SIGNALS INTERFACE
+# ==========================================
+with tab_signals:
+    response = supabase.table("signals").select("*").eq("status", "PENDING").execute()
+    signals = response.data
     
-    st.markdown("""
-    ### 🛠️ Next Steps Based on the Error Above:
-    * If the error says **"Invalid API key"** or **"JWTRefused"**: Your `SUPABASE_KEY` string inside Streamlit secrets is missing characters. Re-copy the **service_role** key carefully.
-    * If the error says **"relation public.signals does not exist"**: Go to your Supabase dashboard and double-check your table name. Ensure it is exactly all lowercase `signals` plural.
-    """)
+    if not signals:
+        st.success("🟢 All systems nominal. No pending signals detected.")
+    else:
+        st.warning(f"🚨 Attention: {len(signals)} Trade Action(s) Required")
+        
+        for sig in signals:
+            ticker = sig['ticker']
+            direction = sig['direction']
+            alert_price = sig['execution_price']
+            
+            with st.container(border=True):
+                col_title, col_metric = st.columns()
+                with col_title:
+                    st.markdown(f"### 💱 Asset: `{ticker}`")
+                    color = "green" if direction == "BUY" else "red"
+                    st.markdown(f"Action Request: :{color}[**{direction}**]")
+                with col_metric:
+                    st.metric(label="Cloud Trigger", value=f"\${alert_price:.2f}")
+                
+                # --- INTERACTIVE CANDLESTICK CHART EXPANDER ---
+                with st.expander("🔍 View Live Technical Analysis Chart", expanded=False):
+                    st.write("Loading technical chart grid...")
+                    raw_df = yf.download(ticker, period="6mo", interval="1d")
+                    if not raw_df.empty:
+                        if isinstance(raw_df.columns, pd.MultiIndex):
+                            raw_df.columns = raw_df.columns.get_level_values(0)
+                        raw_df.columns = raw_df.columns.str.lower()
+                        
+                        # Generate Simple Moving Average lines dynamically on demand
+                        raw_df['sma_50'] = raw_df['close'].rolling(window=50).mean()
+                        raw_df['sma_200'] = raw_df['close'].rolling(window=200).mean()
+                        
+                        # Construct a rich, responsive interactive graphical element
+                        fig = go.Figure()
+                        fig.add_trace(go.Candlestick(
+                            x=raw_df.index, open=raw_df['open'], high=raw_df['high'],
+                            low=raw_df['low'], close=raw_df['close'], name="Price Action"
+                        ))
+                        fig.add_trace(go.Scatter(x=raw_df.index, y=raw_df['sma_50'], line=dict(color='orange', width=1.5), name="SMA 50"))
+                        fig.add_trace(go.Scatter(x=raw_df.index, y=raw_df['sma_200'], line=dict(color='blue', width=1.5), name="SMA 200"))
+                        
+                        fig.update_layout(
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            height=300,
+                            xaxis_rangeslider_visible=False,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.error("Live chart feed currently unavailable.")
+                
+                # --- RESPONSE MANAGEMENT INTERFACES ---
+                btn_left, btn_right = st.columns(2)
+                with btn_left:
+                    if st.button("✅ Log as Traded", key=f"tr_{sig['id']}", use_container_width=True):
+                        supabase.table("signals").update({"status": "MANUALLY_TRADED"}).eq("id", sig['id']).execute()
+                        st.toast(f"Logged {ticker} placement.")
+                        st.rerun()
+                with btn_right:
+                    if st.button("❌ Dismiss Alert", key=f"ds_{sig['id']}", use_container_width=True):
+                        supabase.table("signals").update({"status": "DISMISSED"}).eq("id", sig['id']).execute()
+                        st.toast("Signal cleared.")
+                        st.rerun()
+
+# ==========================================
+# TAB 2: HISTORICAL TRADING JOURNAL
+# ==========================================
+with tab_analytics:
+    st.subheader("📁 Strategy Historical Log")
+    
+    history_res = supabase.table("signals").select("*").neq("status", "PENDING").order("created_at", descending=True).execute()
+    history_data = history_res.data
+    
+    if not history_data:
+        st.info("No recorded historical data available.")
+    else:
+        hist_df = pd.DataFrame(history_data)
+        
+        # Summary Analytics Layout Cards
+        total_signals = len(hist_df)
+        traded_count = len(hist_df[hist_df['status'] == 'MANUALLY_TRADED'])
+        acceptance_rate = (traded_count / total_signals * 100) if total_signals > 0 else 0
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Scans Logged", total_signals)
+        col_m2.metric("Executed", traded_count)
+        col_m3.metric("Action Rate", f"{acceptance_rate:.1f}%")
+        
+        # Distribution Pie Chart
+        st.markdown("### 📊 System Activity Breakdown")
+        status_counts = hist_df['status'].value_counts()
+        fig_pie = go.Figure(data=[go.Pie(
+            labels=status_counts.index, 
+            values=status_counts.values, 
+            hole=.4,
+            marker=dict(colors=['#2ca02c', '#d62728', '#7f7f7f'])
+        )])
+        fig_pie.update_layout(height=250, margin=dict(l=10, r=10, t=20, b=10))
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Complete Historical Data Table
+        st.markdown("### 📝 Full Audit History Ledger")
+        st.dataframe(
+            hist_df[['ticker', 'direction', 'execution_price', 'status']], 
+            use_container_width=True
+        )
