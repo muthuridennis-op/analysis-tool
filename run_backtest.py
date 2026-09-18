@@ -6,35 +6,41 @@ import os
 import sys
 from supabase import create_client
 
-# ==============================================================================
-# 🛡️ SYSTEM RISK PROFILER
-# ==============================================================================
-def get_risk_params(ticker, signal_type, current_price):
+# ==========================================================
+# 🛡️ SYSTEM RISK PROFILER (VOLATILITY-ADAPTIVE ATR)
+# ==========================================================
+def get_atr_risk_params(ticker, signal_type, current_price, atr_value):
+    if pd.isna(atr_value) or atr_value <= 0:
+        atr_value = current_price * 0.015
+        
     if ticker == "^GSPC":
-        sl_pct = 0.01  # 1% Stop Loss
-        tp_pct = 0.03  # 3% Take Profit
+        sl_multiplier = 1.5  
+        tp_multiplier = 3.5  
     elif ticker in ["CL=F", "BZ=F", "OIL_ARB_SPREAD"]:
-        sl_pct = 0.04  # 4% Stop Loss
-        tp_pct = 0.08  # 8% Take Profit
+        sl_multiplier = 2.5  
+        tp_multiplier = 5.5  
     elif ticker == "GC=F":
-        sl_pct = 0.02  # 2% Stop Loss
-        tp_pct = 0.05  # 5% Take Profit
+        sl_multiplier = 2.0  
+        tp_multiplier = 4.5  
     else:
-        sl_pct = 0.025 # 2.5% Stop Loss
-        tp_pct = 0.06  # 6% Take Profit
+        sl_multiplier = 2.0  
+        tp_multiplier = 5.0  
+
+    risk_dist = atr_value * sl_multiplier
+    reward_dist = atr_value * tp_multiplier
 
     if signal_type == "BUY" or signal_type == "LONG_SPREAD":
-        sl_price = current_price * (1 - sl_pct)
-        tp_price = current_price * (1 + tp_pct)
+        sl_price = current_price - risk_dist
+        tp_price = current_price + reward_dist
     else:
-        sl_price = current_price * (1 + sl_pct)
-        tp_price = current_price * (1 - tp_pct)
+        sl_price = current_price + risk_dist
+        tp_price = current_price - reward_dist
         
-    return sl_price, tp_price
+    return float(sl_price), float(tp_price)
 
-# ==============================================================================
+# ==========================================================
 # 📊 TECHNICAL STRATEGY ENGINES
-# ==============================================================================
+# ==========================================================
 def execute_asset_strategy(ticker, df):
     close_prices = df["close"].to_numpy().astype(float)
     volume_data = df["volume"].to_numpy().astype(float)
@@ -45,12 +51,12 @@ def execute_asset_strategy(ticker, df):
         df["ema_50"] = talib.EMA(close_prices, timeperiod=50)
         df["rsi"] = talib.RSI(close_prices, timeperiod=14)
         
-        ema_cross_up = (df["ema_20"] > df["ema_50"]) & (df["ema_20"].shift(1) <= df["ema_50"].shift(1))
-        ema_cross_down = (df["ema_20"] < df["ema_50"]) & (df["ema_20"].shift(1) >= df["ema_50"].shift(1))
+        cross_up = (df["ema_20"] > df["ema_50"]) & (df["ema_20"].shift(1) <= df["ema_50"].shift(1))
+        cross_down = (df["ema_20"] < df["ema_50"]) & (df["ema_20"].shift(1) >= df["ema_50"].shift(1))
         
-        if ema_cross_up.iloc[-1] and (50 < df["rsi"].iloc[-1] < 65):
+        if cross_up.iloc[-1] and (50 < df["rsi"].iloc[-1] < 65):
             return "BUY", current_price
-        elif ema_cross_down.iloc[-1] and (35 < df["rsi"].iloc[-1] < 50):
+        elif cross_down.iloc[-1] and (35 < df["rsi"].iloc[-1] < 50):
             return "SELL", current_price
 
     elif ticker == "^GSPC":
@@ -64,123 +70,127 @@ def execute_asset_strategy(ticker, df):
 
     elif ticker == "GC=F":
         df["volume_ma"] = talib.SMA(volume_data, timeperiod=20)
-        upper, middle, lower = talib.BBANDS(close_prices, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+        up, mid, lw = talib.BBANDS(close_prices, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
         
-        breakout_up = (df["close"] > upper) & (df["close"].shift(1) <= upper.shift(1))
-        breakout_down = (df["close"] < lower) & (df["close"].shift(1) >= lower.shift(1))
-        volume_confirmed = df["volume"] > df["volume_ma"]
+        break_up = (df["close"] > up) & (df["close"].shift(1) <= up.shift(1))
+        break_dn = (df["close"] < lw) & (df["close"].shift(1) >= lw.shift(1))
+        vol_ok = df["volume"] > df["volume_ma"]
         
-        if breakout_up.iloc[-1] and volume_confirmed.iloc[-1]:
+        if break_up.iloc[-1] and vol_ok.iloc[-1]:
             return "BUY", current_price
-        elif breakout_down.iloc[-1] and volume_confirmed.iloc[-1]:
+        elif break_dn.iloc[-1] and vol_ok.iloc[-1]:
             return "SELL", current_price
 
     elif ticker in ["CL=F", "BZ=F"]:
         df["volume_ma"] = talib.SMA(volume_data, timeperiod=20)
         macd, signal, hist = talib.MACD(close_prices, fastperiod=12, slowperiod=26, signalperiod=9)
         
-        macd_cross_up = (macd > signal) & (macd.shift(1) <= signal.shift(1))
-        macd_cross_down = (macd < signal) & (macd.shift(1) >= signal.shift(1))
-        volume_confirmed = df["volume"] > df["volume_ma"]
+        macd_up = (macd > signal) & (macd.shift(1) <= signal.shift(1))
+        macd_dn = (macd < signal) & (macd.shift(1) >= signal.shift(1))
+        vol_ok = df["volume"] > df["volume_ma"]
         
-        if macd_cross_up.iloc[-1] and volume_confirmed.iloc[-1]:
+        if macd_up.iloc[-1] and vol_ok.iloc[-1]:
             return "BUY", current_price
-        elif macd_cross_down.iloc[-1] and volume_confirmed.iloc[-1]:
+        elif macd_dn.iloc[-1] and vol_ok.iloc[-1]:
             return "SELL", current_price
 
     return None, None
 
-# ==============================================================================
-# ⛓️ STATISTICAL ARBITRAGE ENGINE (PAIRS SPREAD REVERSION)
-# ==============================================================================
+# ==========================================================
+# ⛓️ STATISTICAL ARBITRAGE ENGINE (PAIRS)
+# ==========================================================
 def execute_statistical_arbitrage(supabase_client):
-    print("⛓️ Running Statistical Arbitrage Engine (Brent vs WTI Oil)...")
+    print("⛓️ Running Arbitrage Engine...")
     try:
         brent = yf.download("BZ=F", period="1y", interval="1d")
         wti = yf.download("CL=F", period="1y", interval="1d")
         
         if brent.empty or wti.empty:
-            print("⚠️ Arbitrage Error: Failed to fetch underlying pair matrices.")
+            print("⚠️ Pairs data missing.")
             return
 
-        if isinstance(brent.columns, pd.MultiIndex): brent.columns = brent.columns.get_level_values(0)
-        if isinstance(wti.columns, pd.MultiIndex): wti.columns = wti.columns.get_level_values(0)
+        if isinstance(brent.columns, pd.MultiIndex):
+            brent.columns = brent.columns.get_level_values(0)
+        if isinstance(wti.columns, pd.MultiIndex):
+            wti.columns = wti.columns.get_level_values(0)
         
-        combined = pd.DataFrame(index=brent.index)
-        combined["brent"] = brent["close"].astype(float)
-        combined["wti"] = wti["close"].astype(float)
-        combined = combined.ffill().bfill()
+        comb = pd.DataFrame(index=brent.index)
+        comb["brent"] = brent["close"].astype(float)
+        comb["wti"] = wti["close"].astype(float)
+        comb = comb.ffill().bfill()
         
-        combined["spread"] = combined["brent"] - combined["wti"]
-        spread_arr = combined["spread"].to_numpy()
+        comb["spread"] = comb["brent"] - comb["wti"]
+        spread_arr = comb["spread"].to_numpy()
         
-        upper_std, mid_std, lower_std = talib.BBANDS(spread_arr, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+        up, mid, lw = talib.BBANDS(spread_arr, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
         
-        current_spread = float(combined["spread"].iloc[-1])
-        prev_spread = float(combined["spread"].shift(1).iloc[-1])
+        cur_spread = float(comb["spread"].iloc[-1])
+        prev_spread = float(comb["spread"].shift(1).iloc[-1])
         
-        if current_spread > upper_std[-1] and prev_spread <= upper_std[-2]:
-            sl, tp = get_risk_params("OIL_ARB_SPREAD", "SHORT_SPREAD", current_spread)
+        hi_spread = comb["spread"].rolling(14).max().to_numpy()
+        lo_spread = comb["spread"].rolling(14).min().to_numpy()
+        sp_atr = np.mean(hi_spread - lo_spread) / 2.0
+        
+        if cur_spread > up[-1] and prev_spread <= up[-2]:
+            sl, tp = get_atr_risk_params("OIL_ARB_SPREAD", "SHORT_SPREAD", cur_spread, sp_atr)
             supabase_client.table("signals").insert({
-                "ticker": "BZ=F vs CL=F (Oil Spread)",
+                "ticker": "BZ=F vs CL=F (Spread)",
                 "direction": "SHORT SPREAD (Sell Brent / Buy WTI)",
-                "execution_price": current_spread,
+                "execution_price": cur_spread,
                 "stop_loss": sl,
                 "take_profit": tp,
                 "status": "PENDING"
             }).execute()
-            print("🚨 ARBITRAGE SIGNAL: Overvalued crude oil spread dislocated upwards.")
+            print("🚨 ARBITRAGE: Spread overvalued. Pushed to app.")
             
-        elif current_spread < lower_std[-1] and prev_spread >= lower_std[-2]:
-            sl, tp = get_risk_params("OIL_ARB_SPREAD", "LONG_SPREAD", current_spread)
+        elif cur_spread < lw[-1] and prev_spread >= lw[-2]:
+            sl, tp = get_atr_risk_params("OIL_ARB_SPREAD", "LONG_SPREAD", cur_spread, sp_atr)
             supabase_client.table("signals").insert({
-                "ticker": "BZ=F vs CL=F (Oil Spread)",
+                "ticker": "BZ=F vs CL=F (Spread)",
                 "direction": "LONG SPREAD (Buy Brent / Sell WTI)",
-                "execution_price": current_spread,
+                "execution_price": cur_spread,
                 "stop_loss": sl,
                 "take_profit": tp,
                 "status": "PENDING"
             }).execute()
-            print("🚨 ARBITRAGE SIGNAL: Undervalued crude oil spread dislocated downwards.")
+            print("🚨 ARBITRAGE: Spread undervalued. Pushed to app.")
         else:
-            print(f"🔍 Arbitrage tracking normal. Current spread: ${current_spread:.2f}")
+            print(f"🔍 Spread normal: ${cur_spread:.2f}")
             
     except Exception as e:
-        print(f"❌ Statistical Arbitrage execution loop exception caught: {e}")
+        print(f"❌ Arbitrage error: {e}")
 
-# ==============================================================================
+# ==========================================================
 # 🎛️ CORE RUNNER EXECUTIVE
-# ==============================================================================
+# ==========================================================
 def run_pipeline():
     watch_list = [
         "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDJPY=X", "USDCAD=X", 
         "^GSPC", "GC=F", "CL=F", "BZ=F"
     ]
     
-    print(f"🏁 Launching Quantitative Cloud Scanner for {len(watch_list)} instruments...")
+    print("🏁 Starting Cloud Scanner...")
     
-    # 🔍 SYSTEM VALIDATION: Verify if secrets are actually injecting into the container environment
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
     
     if not url or not key:
-        print("🚨 CRITICAL PRE-BUILD ERROR: Supabase Credentials are missing from Container Env context!")
-        print(f"DEBUG ENV DETECTED -> URL: {'PRESENT' if url else 'MISSING'}, KEY: {'PRESENT' if key else 'MISSING'}")
-        sys.exit(1) # Kill the script explicitly to flag configuration errors instantly
+        print("🚨 CRITICAL ERROR: Env secrets are missing!")
+        sys.exit(1)
         
     try:
         supabase = create_client(url, key)
-        print("✅ Supabase client context initialized successfully inside container.")
-    except Exception as connection_err:
-        print(f"🚨 CRITICAL SYSTEM TERMINATION: DB initialization failed: {connection_err}")
+        print("✅ DB Client loaded.")
+    except Exception as conn_err:
+        print(f"🚨 DB init failed: {conn_err}")
         sys.exit(1)
     
-    # Cycle 1: Process Asset-Specific Indicators
+    # Cycle 1: Process individual assets
     for asset in watch_list:
         try:
             df = yf.download(asset, period="1y", interval="1d")
             if df.empty or len(df) < 200:
-                print(f"⚠️ Skipping {asset}: Empty data or low depth.")
+                print(f"⚠️ Skipping {asset}: Low data.")
                 continue
                 
             if isinstance(df.columns, pd.MultiIndex): 
@@ -188,10 +198,17 @@ def run_pipeline():
             df.columns = df.columns.str.lower()
             df = df.loc[~df.index.duplicated(keep="first")].sort_index().ffill().bfill()
             
+            hi = df["high"].to_numpy().astype(float)
+            lw = df["low"].to_numpy().astype(float)
+            cl = df["close"].to_numpy().astype(float)
+            
+            df["atr"] = talib.ATR(hi, lw, cl, timeperiod=14)
+            current_atr = float(df["atr"].iloc[-1])
+            
             signal, trigger_price = execute_asset_strategy(asset, df)
             
             if signal:
-                sl, tp = get_risk_params(asset, signal, trigger_price)
+                sl, tp = get_atr_risk_params(asset, signal, trigger_price, current_atr)
                 supabase.table("signals").insert({
                     "ticker": asset,
                     "direction": signal,
@@ -200,14 +217,14 @@ def run_pipeline():
                     "take_profit": tp,
                     "status": "PENDING"
                 }).execute()
-                print(f"🚀 Found alpha trend entry configuration for {asset}. Data mapped to Cloud State.")
+                print(f"🚀 Signal logged for {asset}.")
                 
         except Exception as asset_err:
-            print(f"❌ Processing exception triggered inside {asset} script nodes: {asset_err}")
+            print(f"❌ Error on asset {asset}: {asset_err}")
             
-    # Cycle 2: Execute Statistical Cross-Market Arbitrage Engine
+    # Cycle 2: Process Statistical Arbitrage
     execute_statistical_arbitrage(supabase)
-    print("🏆 Cloud execution framework completed safely.")
+    print("🏆 Pipeline loop completed safely.")
 
 if __name__ == "__main__":
     run_pipeline()
