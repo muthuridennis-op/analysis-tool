@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '15 20 * * 1-5' # Automatically executes every weekday at 20:15 PM UTC (After US Market close)
+    # Runs automatically every weekday at 22:05 UTC (5 mins after Forex Daily Close)
+    - cron: '5 22 * * 1-5'
 
 jobs:
   execute_backtest:
@@ -22,4 +23,6 @@ jobs:
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       run: |
         docker build -t algo-engine .
-        docker run --env SUPABASE_URL=$SUPABASE_URL --env SUPABASE_KEY=$SUPABASE_KEY algo-engine
+        docker run --env SUPABASE_URL=$SUPABASE_URL \
+                   --env SUPABASE_KEY=$SUPABASE_KEY \
+                   algo-engine
