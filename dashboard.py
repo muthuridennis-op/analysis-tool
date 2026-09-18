@@ -15,6 +15,27 @@ supabase = init_supabase()
 
 st.title("📱 Quantitative Trading Terminal")
 
+# --- GLOBAL SEARCH LOOKUP ENGINE COMPONENT ---
+# Maps cryptic ticker strings to simple human-readable names for your mobile interface
+friendly_names = {
+    "All Assets": "All Assets",
+    "EURUSD=X": "EURUSD (Euro)",
+    "GBPUSD=X": "GBPUSD (Pound)",
+    "AUDUSD=X": "AUDUSD (Aussie)",
+    "USDJPY=X": "USDJPY (Yen)",
+    "USDCAD=X": "USDCAD (Loonie)",
+    "^GSPC": "S&P 500 Index",
+    "GC=F": "GC=F (Gold)",
+    "CL=F": "CL=F (Crude Oil)",
+    "BZ=F": "BZ=F (Brent Oil)"
+}
+
+search_selection = st.selectbox(
+    "🔍 Filter Terminal Dashboard by Asset Symbol:",
+    options=list(friendly_names.keys()),
+    format_func=lambda x: friendly_names[x]
+)
+
 # Interactive Multi-Tab Mobile Framework
 tab_signals, tab_analytics = st.tabs(["📥 Active Signals", "📊 Historical Journal"])
 
@@ -23,16 +44,21 @@ tab_signals, tab_analytics = st.tabs(["📥 Active Signals", "📊 Historical Jo
 # ==========================================
 with tab_signals:
     try:
-        response = supabase.table("signals").select("*").eq("status", "PENDING").execute()
+        query = supabase.table("signals").select("*").eq("status", "PENDING")
+        # Apply strict query filtration if a single symbol focus is picked
+        if search_selection != "All Assets":
+            query = query.eq("ticker", search_selection)
+            
+        response = query.execute()
         signals = response.data
     except Exception as e:
         st.error(f"Database Query Error: {e}")
         signals = []
     
     if not signals:
-        st.success("🟢 All systems nominal. No pending signals detected.")
+        st.success(f"🟢 No pending signals for {friendly_names[search_selection]}.")
     else:
-        st.warning(f"🚨 Attention: {len(signals)} Trade Action(s) Required")
+        st.warning(f"🚨 Attention: {len(signals)} Action(s) Required")
         
         for sig in signals:
             ticker = sig['ticker']
@@ -48,7 +74,7 @@ with tab_signals:
                     color = "green" if direction == "BUY" else "red"
                     st.markdown(f"Action: :{color}[**{direction}**]")
                 with col_m1:
-                    st.metric(label="Entry", value=f"\${alert_price:.4f}")
+                    st.metric(label="Entry Target", value=f"\${alert_price:.4f}")
                 with col_m2:
                     st.metric(label="🛡️ Stop Loss", value=f"\${stop_loss:.4f}" if stop_loss else "N/A")
                 with col_m3:
@@ -63,11 +89,9 @@ with tab_signals:
                             raw_df.columns = raw_df.columns.get_level_values(0)
                         raw_df.columns = raw_df.columns.str.lower()
                         
-                        # Generate Simple Moving Average lines dynamically on demand
                         raw_df['sma_50'] = raw_df['close'].rolling(window=50).mean()
                         raw_df['sma_200'] = raw_df['close'].rolling(window=200).mean()
                         
-                        # Construct a rich, responsive interactive graphical element
                         fig = go.Figure()
                         fig.add_trace(go.Candlestick(
                             x=raw_df.index, open=raw_df['open'], high=raw_df['high'],
@@ -103,17 +127,21 @@ with tab_signals:
 # TAB 2: HISTORICAL TRADING JOURNAL
 # ==========================================
 with tab_analytics:
-    st.subheader("📁 Strategy Historical Log")
+    st.subheader(f"📁 Journal Logs: {friendly_names[search_selection]}")
     
     try:
-        history_res = supabase.table("signals").select("*").neq("status", "PENDING").order("created_at", desc=True).execute()
+        hist_query = supabase.table("signals").select("*").neq("status", "PENDING")
+        if search_selection != "All Assets":
+            hist_query = hist_query.eq("ticker", search_selection)
+            
+        history_res = hist_query.order("created_at", desc=True).execute()
         history_data = history_res.data
     except Exception as e:
         st.error(f"Error fetching logs: {e}")
         history_data = []
         
     if not history_data:
-        st.info("No recorded historical data available.")
+        st.info(f"No historical logs found matching the filter criteria.")
     else:
         hist_df = pd.DataFrame(history_data)
         
@@ -128,7 +156,7 @@ with tab_analytics:
         col_m3.metric("Action Rate", f"{acceptance_rate:.1f}%")
         
         # Distribution Pie Chart
-        st.markdown("### 📊 System Activity Breakdown")
+        st.markdown("### 📊 Filtered Activity Breakdown")
         status_counts = hist_df['status'].value_counts()
         fig_pie = go.Figure(data=[go.Pie(
             labels=status_counts.index, 
