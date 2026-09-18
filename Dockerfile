@@ -6,8 +6,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and compile the raw TA-Lib C-library 
-RUN wget http://sourceforge.net && \
+# Download and compile TA-Lib using a reliable GitHub source mirror to bypass SourceForge blocks
+RUN wget https://github.com && \
     tar -xzf ta-lib-0.4.0-src.tar.gz && \
     cd ta-lib/ && \
     ./configure --prefix=/usr && \
