@@ -35,7 +35,7 @@ def push_discord_alert(message):
 
 def run_pipeline():
     print("📥 Fetching real-time market data in the cloud...")
-    # Change "AAPL" to a Forex pair like "EURUSD=X" if you are trading currencies on FXPesa!
+    # Change "EURUSD=X" to "AAPL" or any asset ticker you want to scan!
     ticker = "EURUSD=X" 
     df = yf.download(ticker, period="1y", interval="1d")
     
@@ -60,12 +60,9 @@ def run_pipeline():
     
     # 2. Advanced Volume Filter (Calculates 20-day Average Volume)
     df["volume_ma"] = talib.SMA(volume_data, timeperiod=20)
-    
-    # Condition: Current volume must be higher than the 20-day average volume
     high_volume = df["volume"] > df["volume_ma"]
     
     # --- SIGNAL VERIFICATION ENGINE ---
-    # Check the immediate final row representing today's active bar status
     is_crossover = golden_cross.iloc[-1] or death_cross.iloc[-1]
     is_volume_valid = high_volume.iloc[-1]
     
@@ -76,7 +73,15 @@ def run_pipeline():
             current_vol = float(df["volume"].iloc[-1])
             avg_vol = float(df["volume_ma"].iloc[-1])
             
-            print(f"🚨 VALID SIGNAL: {signal_type} crossover supported by strong volume.")
+            # --- CALCULATE RISK MANAGEMENT THRESHOLDS ---
+            if signal_type == "BUY":
+                sl_price = current_price * 0.97  # 3% stop loss below
+                tp_price = current_price * 1.06  # 6% take profit above
+            else:
+                sl_price = current_price * 1.03  # 3% stop loss above
+                tp_price = current_price * 0.94  # 6% take profit below
+                
+            print(f"🚨 VALID SIGNAL: {signal_type} crossover verified. Updating database...")
             
             # Connect to Supabase Cloud Database Layer
             url = os.environ.get("SUPABASE_URL")
@@ -87,18 +92,22 @@ def run_pipeline():
                 "ticker": ticker,
                 "direction": signal_type,
                 "execution_price": current_price,
+                "stop_loss": sl_price,
+                "take_profit": tp_price,
                 "status": "PENDING"
             }).execute()
             
             # --- NOTIFICATION FRAMEWORK ---
-            dashboard_url = "https://streamlit.app" # Replace with your real Streamlit App URL
+            # Replace the placeholder URL below with your real Streamlit App URL link
+            dashboard_url = "https://streamlit.app" 
             
             alert_msg = (
                 f"📈 *Asset:* {ticker}\n"
                 f"⚡ *Direction:* {signal_type}\n"
                 f"💵 *Trigger Price:* ${current_price:.4f}\n"
+                f"🛡️ *Stop Loss:* ${sl_price:.4f} | 🎯 *Take Profit:* ${tp_price:.4f}\n"
                 f"📊 *Volume Profile:* Strong (Current: {current_vol:,.0f} > 20MA: {avg_vol:,.0f})\n\n"
-                f"👉 Open dashboard to log trade: {dashboard_url}"
+                f"👉 Open dashboard to act: {dashboard_url}"
             )
             
             push_telegram_alert(alert_msg)
