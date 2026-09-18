@@ -3,35 +3,7 @@ import pandas as pd
 import numpy as np
 import talib
 import os
-import requests
 from supabase import create_client
-
-def push_telegram_alert(message):
-    """Fires an instant direct notification to your Telegram application"""
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if token and chat_id:
-        url = f"https://telegram.org{token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-        try:
-            requests.post(url, json=payload, timeout=10)
-            print("✉️ Telegram notification broadcast completed successfully.")
-        except Exception as e:
-            print(f"⚠️ Telegram failure: {e}")
-
-def push_discord_alert(message):
-    """Fires a stylized rich text webhook embed directly to your Discord channel"""
-    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
-    if webhook_url:
-        payload = {
-            "username": "Algo Signal Engine",
-            "content": f"🚨 **NEW TRADING SIGNAL IDENTIFIED** 🚨\n{message}"
-        }
-        try:
-            requests.post(webhook_url, json=payload, timeout=10)
-            print("✉️ Discord channel webhook broadcast completed successfully.")
-        except Exception as e:
-            print(f"⚠️ Discord failure: {e}")
 
 def run_pipeline():
     print("📥 Fetching real-time market data in the cloud...")
@@ -70,8 +42,6 @@ def run_pipeline():
         if is_volume_valid:
             signal_type = "BUY" if golden_cross.iloc[-1] else "SELL"
             current_price = float(df["close"].iloc[-1])
-            current_vol = float(df["volume"].iloc[-1])
-            avg_vol = float(df["volume_ma"].iloc[-1])
             
             # --- CALCULATE RISK MANAGEMENT THRESHOLDS ---
             if signal_type == "BUY":
@@ -96,22 +66,7 @@ def run_pipeline():
                 "take_profit": tp_price,
                 "status": "PENDING"
             }).execute()
-            
-            # --- NOTIFICATION FRAMEWORK ---
-            # Replace the placeholder URL below with your real Streamlit App URL link
-            dashboard_url = "https://streamlit.app" 
-            
-            alert_msg = (
-                f"📈 *Asset:* {ticker}\n"
-                f"⚡ *Direction:* {signal_type}\n"
-                f"💵 *Trigger Price:* ${current_price:.4f}\n"
-                f"🛡️ *Stop Loss:* ${sl_price:.4f} | 🎯 *Take Profit:* ${tp_price:.4f}\n"
-                f"📊 *Volume Profile:* Strong (Current: {current_vol:,.0f} > 20MA: {avg_vol:,.0f})\n\n"
-                f"👉 Open dashboard to act: {dashboard_url}"
-            )
-            
-            push_telegram_alert(alert_msg)
-            push_discord_alert(alert_msg)
+            print("🚀 Signal pushed successfully to database layer.")
         else:
             print("🔍 Crossover spotted, but REJECTED due to low institutional volume (Sideways Market).")
     else:
