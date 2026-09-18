@@ -30,8 +30,8 @@ def evaluate_forex(close_prices):
 
 def evaluate_index(close_prices, sma_200):
     rsi_2 = talib.RSI(close_prices, timeperiod=2)
-    if (close_prices[-1] > sma_200[-1]) and (rsi_2[-1] < 10): return "BUY"
-    if (close_prices[-1] < sma_200[-1]) and (rsi_2[-1] > 90): return "SELL"
+    if (close_prices[-1] > sma_200[-1]) and (rsi_2[-1] < 20): return "BUY"
+    if (close_prices[-1] < sma_200[-1]) and (rsi_2[-1] > 80): return "SELL"
     return None
 
 def evaluate_gold(close_prices, upper, lower, volume, volume_ma):
