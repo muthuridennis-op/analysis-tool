@@ -1,5 +1,6 @@
-streamlit>=1.35.0
-supabase>=2.5.0
-pydantic>=2.0.0
-plotly>=5.20.0
-yfinance>=0.2.52
+yfinance==0.2.52
+pandas==2.2.3
+numpy==1.26.4
+ta-lib-bin==0.4.0.3
+scipy==1.15.1
+supabase==2.13.0
