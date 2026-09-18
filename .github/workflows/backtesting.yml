@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
   schedule:
-    # Runs automatically every weekday at 22:05 UTC (5 mins after Forex Daily Close)
     - cron: '5 22 * * 1-5'
 
 jobs:
@@ -23,6 +22,5 @@ jobs:
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       run: |
         docker build -t algo-engine .
-        docker run --env SUPABASE_URL=$SUPABASE_URL \
-                   --env SUPABASE_KEY=$SUPABASE_KEY \
-                   algo-engine
+        # FIX: Explicitly passing environmental variables directly inside the container entry layer using -e
+        docker run -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" -e SUPABASE_KEY="${{ secrets.SUPABASE_KEY }}" algo-engine
