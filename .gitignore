@@ -1,3 +1,25 @@
+# Environment
 .env
 
+# Logs
+logs/
+backtest_results/
 
+# Local research tool (not for GitHub)
+backtester.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
