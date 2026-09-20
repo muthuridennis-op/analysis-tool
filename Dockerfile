@@ -27,4 +27,4 @@ COPY . .
 RUN micromamba run -n base pip install --no-cache-dir -r requirements.txt
 
 # Run the app using micromamba's environmental shell execution layer
-CMD ["micromamba", "run", "-n", "base", "python", "run_backtest.py"]
+CMD ["micromamba", "run", "-n", "base", "python", "scanner.py"]
