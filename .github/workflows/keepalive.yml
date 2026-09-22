@@ -11,4 +11,4 @@ jobs:
     steps:
       - name: Ping Streamlit app
         run: |
-          curl -s -o /dev/null -w "%{http_code}\n" https://your-app.streamlit.app
+          curl -s -o /dev/null -w "%{http_code}\n" https://analysis-tool-yiv5hlpnt2gjpz7yerkszg.streamlit.app/
