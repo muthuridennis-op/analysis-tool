@@ -16,6 +16,7 @@ logs/
 
 # Backtest outputs
 backtest_results/
+backtester.py
 
 # IDE
 .vscode/
