@@ -5,7 +5,6 @@ them when SL or TP is hit. Signals exceeding MAX_AGE_DAYS become CLOSED_TIME.
 
 Run this on a schedule (e.g. hourly) alongside the scanner.
 """
-import os
 import pandas as pd
 import yfinance as yf
 
@@ -14,6 +13,7 @@ load_dotenv()
 
 from database import DatabaseManager
 from logger import get_logger
+from timeutils import utcnow, to_utc, daily_index_to_utc
 import config
 
 log = get_logger(__name__)
@@ -32,11 +32,17 @@ def _fetch_recent_prices(ticker: str, since: pd.Timestamp) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df.columns = df.columns.str.lower()
+
+    if isinstance(df.index, pd.DatetimeIndex):
+        if df.index.tz is None:
+            df.index = daily_index_to_utc(df.index)
+        else:
+            df.index = df.index.tz_convert("UTC")
     return df
 
 
 def _evaluate_signal(sig: dict, prices: pd.DataFrame):
-    created_at = pd.Timestamp(sig["created_at"]).tz_localize(None)
+    created_at = to_utc(sig["created_at"])
     direction = sig["direction"]
     sl = float(sig["stop_loss"]) if sig.get("stop_loss") else None
     tp = float(sig["take_profit"]) if sig.get("take_profit") else None
@@ -49,22 +55,31 @@ def _evaluate_signal(sig: dict, prices: pd.DataFrame):
         return None, None, None
 
     for ts, row in eligible.iterrows():
+        op = float(row["open"])
         hi = float(row["high"])
         lo = float(row["low"])
 
         if direction == "BUY":
+            if op <= sl:
+                return "CLOSED_SL", op, ts
+            if op >= tp:
+                return "CLOSED_TP", op, ts
             if lo <= sl:
                 return "CLOSED_SL", sl, ts
             if hi >= tp:
                 return "CLOSED_TP", tp, ts
         else:
+            if op >= sl:
+                return "CLOSED_SL", op, ts
+            if op <= tp:
+                return "CLOSED_TP", op, ts
             if hi >= sl:
                 return "CLOSED_SL", sl, ts
             if lo <= tp:
                 return "CLOSED_TP", tp, ts
 
     max_age = getattr(config, "OUTCOME_MAX_AGE_DAYS", 45)
-    age_days = (pd.Timestamp.utcnow().tz_localize(None) - created_at).days
+    age_days = (utcnow() - created_at).days
     if age_days >= max_age:
         last_close = float(eligible["close"].iloc[-1])
         return "CLOSED_TIME", last_close, eligible.index[-1]
@@ -97,7 +112,7 @@ def process_outcomes():
 
     closed = 0
     for ticker, sigs in by_ticker.items():
-        earliest = min(pd.Timestamp(s["created_at"]).tz_localize(None) for s in sigs)
+        earliest = min(to_utc(s["created_at"]) for s in sigs)
         try:
             prices = _fetch_recent_prices(ticker, earliest - pd.Timedelta(days=2))
         except Exception as e:

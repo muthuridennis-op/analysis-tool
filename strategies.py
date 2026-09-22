@@ -19,7 +19,7 @@ def safe_shift(numpy_array):
     return result
 
 
-def evaluate_index(close_prices, sma_200, vix_value=None, high=None, low=None,
+def evaluate_index(close_prices, sma_200, vix_series=None, high=None, low=None,
                    weekly_close=None, weekly_sma=None):
     """
     RSI(2) mean-reversion with SMA(200) trend filter for the S&P 500.
@@ -33,7 +33,7 @@ def evaluate_index(close_prices, sma_200, vix_value=None, high=None, low=None,
     Args:
         close_prices:  daily closes (np.array)
         sma_200:       daily SMA(200) array
-        vix_value:     optional daily VIX closes (np.array)
+        vix_series:    optional daily VIX closes (np.array), most recent last
         high, low:     daily high/low arrays for ADX
         weekly_close:  weekly closes (np.array)
         weekly_sma:    weekly SMA (np.array)
@@ -62,11 +62,14 @@ def evaluate_index(close_prices, sma_200, vix_value=None, high=None, low=None,
 
     # --- VIX filter (BUY side only) ---
     vix_ok_buy = True
-    if vix_value is not None and len(vix_value) >= 2:
-        from config import VIX_BUY_THRESHOLD
-        vix_ok_buy = (vix_value[-1] > VIX_BUY_THRESHOLD) and (vix_value[-1] < vix_value[-2])
-        log.debug("VIX gate: value=%.2f prev=%.2f ok=%s",
-                  vix_value[-1], vix_value[-2], vix_ok_buy)
+    if vix_series is not None and len(vix_series) >= 2:
+        if not (np.isnan(vix_series[-1]) or np.isnan(vix_series[-2])):
+            from config import VIX_BUY_THRESHOLD
+            vix_ok_buy = (vix_series[-1] > VIX_BUY_THRESHOLD) and (vix_series[-1] < vix_series[-2])
+            log.debug("VIX gate: value=%.2f prev=%.2f ok=%s",
+                      vix_series[-1], vix_series[-2], vix_ok_buy)
+        else:
+            log.debug("VIX gate skipped: NaN in tail")
 
     # --- ADX regime gate ---
     adx_ok = True

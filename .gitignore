@@ -1,25 +1,26 @@
-# Environment
+# Secrets
 .env
-
-# Logs
-logs/
-backtest_results/
-
-# Local research tool (not for GitHub)
-backtester.py
+.env.*
+!.env.example
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-.venv/
+*.egg-info/
 venv/
-env/
+.venv/
 
-# Streamlit
-.streamlit/secrets.toml
+# Logs
+logs/
+*.log
+
+# Backtest outputs
+backtest_results/
 
 # IDE
 .vscode/
 .idea/
 .DS_Store
+
+# Streamlit
+.streamlit/secrets.toml

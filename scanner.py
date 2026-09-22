@@ -14,6 +14,8 @@ from database import DatabaseManager
 import strategies
 from data_provider import RobustDataProvider
 from logger import get_logger
+from timeutils import utcnow, to_market_tz
+from sizing import compute_position_size
 
 log = get_logger(__name__)
 
@@ -25,7 +27,7 @@ def is_duplicate_signal(ticker, timeframe, current_direction):
     tf = timeframe.upper()
     max_bars = config.DEDUP_LOOKBACK_BARS.get(timeframe, 5)
     bar_hours = 24 if timeframe == "1d" else 4
-    cutoff = (pd.Timestamp.utcnow() - pd.Timedelta(hours=bar_hours * max_bars)).isoformat()
+    cutoff = (utcnow() - pd.Timedelta(hours=bar_hours * max_bars)).isoformat()
 
     try:
         response = db.client.table("signals") \
@@ -66,10 +68,11 @@ def get_risk_bounds(ticker, signal, price, atr):
 
 
 def in_session(ticker):
+    """Session windows in config are treated as MARKET-LOCAL (US/Eastern)."""
     windows = config.SESSION_WINDOWS.get(ticker)
     if not windows:
         return True
-    hour = pd.Timestamp.utcnow().hour
+    hour = to_market_tz(utcnow()).hour
     return any(start <= hour < end for start, end in windows)
 
 
@@ -114,10 +117,20 @@ def scan_portfolio():
 
                 lookback_days = 400
                 df = provider.fetch_data(asset, timeframe, lookback_days)
+                source = df.attrs.get("source", "unknown")
 
                 if df.empty or len(df) < 200:
-                    log.warning("Skipping %s: insufficient data (%d bars)",
-                                asset, len(df) if not df.empty else 0)
+                    log.warning("Skipping %s: insufficient data (%d bars, source=%s)",
+                                asset, len(df) if not df.empty else 0, source)
+                    continue
+
+                if source == "yfinance":
+                    log.warning(
+                        "⚠️ %s data came from yfinance fallback — verify before trading",
+                        asset,
+                    )
+                elif source == "none":
+                    log.error("No data for %s from any source", asset)
                     continue
 
                 if isinstance(df.columns, pd.MultiIndex):
@@ -137,19 +150,19 @@ def scan_portfolio():
                 if getattr(config, "MTF_ENABLED", False):
                     weekly_close, weekly_sma = build_weekly_context(df)
 
-                vix_value = None
+                vix_series = None
                 try:
                     vix_df = provider.fetch_data("^VIX", "1d", 30)
                     if vix_df is not None and not vix_df.empty:
                         if isinstance(vix_df.columns, pd.MultiIndex):
                             vix_df.columns = vix_df.columns.get_level_values(0)
                         vix_df.columns = vix_df.columns.str.lower()
-                        vix_value = vix_df["close"].to_numpy().astype(float)
+                        vix_series = vix_df["close"].to_numpy().astype(float)
                 except Exception as e:
                     log.debug("VIX fetch skipped: %s", e)
 
                 signal = strategies.evaluate_index(
-                    cl, sma_200, vix_value, hi, lw,
+                    cl, sma_200, vix_series, hi, lw,
                     weekly_close=weekly_close,
                     weekly_sma=weekly_sma,
                 )
@@ -163,13 +176,19 @@ def scan_portfolio():
                     cur_price = float(cl[-1])
                     sl, tp = get_risk_bounds(asset, signal, cur_price, atr)
 
+                    size_info = compute_position_size(asset, cur_price, sl)
+                    if size_info is None:
+                        log.warning("Skipping %s: could not size position", asset)
+                        continue
+
                     db.insert_signal(
                         ticker=asset,
                         direction=signal,
                         price=cur_price,
                         sl=sl,
                         tp=tp,
-                        timeframe=timeframe
+                        timeframe=timeframe,
+                        size_info=size_info,
                     )
                 else:
                     log.info("No signal for %s on %s", asset, timeframe.upper())

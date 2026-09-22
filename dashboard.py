@@ -40,9 +40,10 @@ supabase = init_supabase()
 
 st.title("📈 S&P 500 Trading Terminal")
 
-# --- SIDEBAR: CALCULATOR ---
+# --- SIDEBAR: CALCULATOR (manual override) ---
 with st.sidebar:
     st.header("🧮 Position Size Calculator")
+    st.caption("Manual override — signals carry their own suggested size.")
     balance = st.number_input("Balance ($)", min_value=100.0, value=10000.0, step=500.0)
     risk_pct = st.slider("Risk (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
     risk_cash = balance * (risk_pct / 100.0)
@@ -96,6 +97,11 @@ with tab_signals:
             reward = abs(tp - alert_price) if tp else 0
             rr = (reward / risk) if risk > 0 else 0
 
+            # Sizing fields (may be None for signals created before the migration)
+            size_units = sig.get("size_units")
+            size_instrument = sig.get("size_instrument")
+            risk_cash = sig.get("risk_cash")
+
             with st.container(border=True):
                 col_title, col_m1, col_m2, col_m3 = st.columns([1.2, 1, 1, 1])
                 with col_title:
@@ -109,6 +115,13 @@ with tab_signals:
                     st.metric("Stop Loss", f"${sl:.2f}" if sl else "N/A")
                 with col_m3:
                     st.metric("Take Profit", f"${tp:.2f}" if tp else "N/A")
+
+                # Suggested size from scanner
+                if size_units:
+                    st.caption(
+                        f"📐 Suggested: **{size_units:g} {size_instrument}** "
+                        f"(risk ≈ ${risk_cash:.2f})"
+                    )
 
                 with st.expander("🔍 Live Chart (6mo Daily + Weekly Trend)"):
                     df = yf.download(ticker, period="1y", interval="1d", progress=False)

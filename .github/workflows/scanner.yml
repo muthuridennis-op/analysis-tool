@@ -1,53 +1,41 @@
-name: S&P 500 Scanner
+name: Run Trading Scanner
 
 on:
   schedule:
-    - cron: '15 21 * * 1-5'
-  workflow_dispatch:
+    # Every hour during US market hours (UTC)
+    # Kenya time (EAT = UTC+3): market opens ~16:30 EAT, closes ~23:00 EAT
+    - cron: '0 14,15,16,17,18,19,20 * * 1-5'
+  workflow_dispatch:  # manual trigger for testing
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
-      - name: Install TA-Lib
+      - name: Install TA-Lib (system dependency)
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget
-          wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+          wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
           tar -xzf ta-lib-0.4.0-src.tar.gz
-          cd ta-lib/
-          ./configure --prefix=/usr
-          make -j$(nproc)
-          sudo make install
+          cd ta-lib && ./configure --prefix=/usr && make && sudo make install
           cd ..
-          rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run scanner
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scanner-logs-${{ github.run_id }}
-          path: logs/
-          retention-days: 14
